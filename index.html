@@ -77,7 +77,6 @@
         .tab-content { display: none; padding: 20px 20px 24px; }
         .tab-content.active { display: block; }
 
-        /* ===== СКАНЕР ===== */
         #reader {
             width: 100%;
             height: 55vh;
@@ -97,27 +96,6 @@
             height: 100%;
             display: block;
         }
-
-        /* ✅ Индикатор текущего варианта предобработки */
-        .variant-indicator {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.65);
-            color: #a78bfa;
-            font-size: 0.7rem;
-            font-weight: 600;
-            padding: 4px 10px;
-            border-radius: 8px;
-            z-index: 10;
-            display: none;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            -webkit-backdrop-filter: blur(4px);
-            backdrop-filter: blur(4px);
-        }
-
-        .variant-indicator.show { display: block; }
 
         .scanner-controls { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
 
@@ -201,7 +179,6 @@
             overflow-y: auto;
         }
 
-        /* ===== МОДАЛКА ===== */
         .scan-modal-overlay {
             position: fixed;
             inset: 0;
@@ -334,7 +311,6 @@
             color: #c8c8e0;
         }
 
-        /* ===== ГЕНЕРАТОР ===== */
         .gen-input-group { display: flex; gap: 10px; margin-bottom: 12px; }
 
         #qr-text {
@@ -418,7 +394,6 @@
 
         .gen-result strong { color: #a78bfa; }
 
-        /* ===== ИСТОРИЯ ===== */
         .history-header { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 
         .btn-clear-all {
@@ -546,7 +521,6 @@
         <div id="scanner" class="tab-content active">
             <div id="reader">
                 <video id="reader-video" muted playsinline autoplay></video>
-                <div id="variant-indicator" class="variant-indicator"></div>
             </div>
             <div class="scanner-controls">
                 <button id="btn-start" class="btn-start">▶ Старт сканирования</button>
@@ -607,7 +581,6 @@
         let currentStream = null;
         let scanningActive = false;
         let scanningFrameId = null;
-        let isDecoding = false;
         let isStopping = false;
         let torchOn = false;
         let torchSupported = false;
@@ -615,127 +588,24 @@
         let lastScanTime = 0;
         const SCAN_DEBOUNCE_MS = 3000;
 
+        // Захват кадров
         let captureCanvas = null;
         let captureCtx = null;
 
+        // Burst-буфер
+        const BURST_SIZE = 3;
+        let burstBuffer = [];
+        let burstIndex = 0;
+        let frameCounter = 0;
+
+        // Переиспользуемые canvas-ы
+        let reusableSrcCanvas = null;
+        let reusableTileCanvas = null;
+        let reusableDownscaleSrc = null;
+        let reusableDownscaleDst = null;
+
         let lastGeneratedCanvas = null;
         let lastGeneratedText = '';
-
-        // ============================================================
-        //  ПРЕДОБРАБОТКИ ИЗОБРАЖЕНИЯ
-        // ============================================================
-        function grayscaleContrast(imageData, factor) {
-            const data = imageData.data;
-            for (let i = 0; i < data.length; i += 4) {
-                const y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-                let v = (y - 128) * factor + 128;
-                v = v < 0 ? 0 : (v > 255 ? 255 : v);
-                data[i] = data[i + 1] = data[i + 2] = v;
-            }
-            return imageData;
-        }
-
-        function invertImageData(imageData) {
-            const data = imageData.data;
-            for (let i = 0; i < data.length; i += 4) {
-                data[i] = 255 - data[i];
-                data[i + 1] = 255 - data[i + 1];
-                data[i + 2] = 255 - data[i + 2];
-            }
-            return imageData;
-        }
-
-        function otsuBinarize(imageData) {
-            const data = imageData.data;
-            const histogram = new Array(256).fill(0);
-            const pixelCount = data.length / 4;
-
-            for (let i = 0; i < data.length; i += 4) {
-                const y = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-                histogram[y]++;
-            }
-
-            let sum = 0;
-            for (let i = 0; i < 256; i++) sum += i * histogram[i];
-
-            let sumB = 0, wB = 0, maxVariance = 0, threshold = 0;
-            for (let t = 0; t < 256; t++) {
-                wB += histogram[t];
-                if (wB === 0) continue;
-                const wF = pixelCount - wB;
-                if (wF === 0) break;
-                sumB += t * histogram[t];
-                const mB = sumB / wB;
-                const mF = (sum - sumB) / wF;
-                const variance = wB * wF * (mB - mF) * (mB - mF);
-                if (variance > maxVariance) {
-                    maxVariance = variance;
-                    threshold = t;
-                }
-            }
-
-            for (let i = 0; i < data.length; i += 4) {
-                const y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-                const v = y > threshold ? 255 : 0;
-                data[i] = data[i + 1] = data[i + 2] = v;
-            }
-            return imageData;
-        }
-
-        function sharpenImageData(imageData) {
-            const width = imageData.width;
-            const height = imageData.height;
-            const data = imageData.data;
-            const copy = new Uint8ClampedArray(data);
-            const kernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
-
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    let sum = 0;
-                    for (let ky = 0; ky < 3; ky++) {
-                        for (let kx = 0; kx < 3; kx++) {
-                            const px = Math.min(width - 1, Math.max(0, x + kx - 1));
-                            const py = Math.min(height - 1, Math.max(0, y + ky - 1));
-                            const idx = (py * width + px) * 4;
-                            sum += copy[idx] * kernel[ky * 3 + kx];
-                        }
-                    }
-                    const outIdx = (y * width + x) * 4;
-                    const val = sum < 0 ? 0 : (sum > 255 ? 255 : sum);
-                    data[outIdx] = data[outIdx + 1] = data[outIdx + 2] = val;
-                }
-            }
-            return imageData;
-        }
-
-        // ============================================================
-        //  СПЕЦИАЛИЗИРОВАННЫЕ ВАРИАНТЫ (для чётных кадров)
-        // ============================================================
-        const SPECIALIZED_VARIANTS = [
-            { name: 'otsu',        apply: (d) => otsuBinarize(d),                        tryInvert: true },
-            { name: 'inverted',    apply: (d) => invertImageData(grayscaleContrast(d, 1.4)), tryInvert: false },
-            { name: 'sharpen',     apply: (d) => sharpenImageData(grayscaleContrast(d, 1.3)), tryInvert: true },
-            { name: 'strong-ctr',  apply: (d) => grayscaleContrast(d, 2.2),              tryInvert: true }
-        ];
-
-        let frameCount = 0;
-        let specializedIndex = 0;
-
-        function getVariantForFrame() {
-            frameCount++;
-            // Нечётные кадры (1, 3, 5...) — grayscale (быстрый путь для обычных кодов)
-            if (frameCount % 2 === 1) {
-                return {
-                    name: 'grayscale',
-                    apply: (d) => grayscaleContrast(d, 1.4),
-                    tryInvert: true
-                };
-            }
-            // Чётные кадры (2, 4, 6...) — специализированные по кругу
-            const v = SPECIALIZED_VARIANTS[specializedIndex % SPECIALIZED_VARIANTS.length];
-            specializedIndex++;
-            return v;
-        }
 
         // ============================================================
         //  ИНИЦИАЛИЗАЦИЯ
@@ -816,7 +686,7 @@
         }
 
         // ============================================================
-        //  СКАНЕР
+        //  СКАНЕР (zxing-wasm + burst + каскад preprocessing)
         // ============================================================
         function initScanner() {
             document.getElementById('btn-start').addEventListener('click', () => {
@@ -844,6 +714,11 @@
 
             document.getElementById('scan-error').style.display = 'none';
 
+            // Сброс состояния
+            burstBuffer = [];
+            burstIndex = 0;
+            frameCounter = 0;
+
             if (!window.isSecureContext) {
                 showScanError('Небезопасное соединение', 'Камера доступна только по HTTPS или на localhost.');
                 resetStartButton();
@@ -859,8 +734,8 @@
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: { ideal: "environment" },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
                     }
                 });
 
@@ -874,10 +749,6 @@
                 });
                 await videoEl.play();
 
-                if (!videoEl.videoWidth || !videoEl.videoHeight) {
-                    throw new Error('Видео не инициализировано (нет размеров)');
-                }
-
                 captureCanvas = document.createElement('canvas');
                 captureCanvas.width = videoEl.videoWidth;
                 captureCanvas.height = videoEl.videoHeight;
@@ -886,15 +757,12 @@
                 console.log(`✓ Камера запущена (${videoEl.videoWidth}×${videoEl.videoHeight})`);
 
                 scanningActive = true;
-                isDecoding = false;
-                frameCount = 0;
-                specializedIndex = 0;
-
                 btnStart.textContent = '⏹ Остановить';
                 btnStart.classList.add('is-scanning');
                 btnStart.disabled = false;
 
                 await checkTorchSupport();
+
                 scanningFrameId = requestAnimationFrame(scanLoop);
 
             } catch (err) {
@@ -924,56 +792,92 @@
             }
         }
 
+        // ✅ Главный цикл: raw → burst → tiles
         async function scanLoop() {
             if (!scanningActive) return;
-            scanningFrameId = requestAnimationFrame(scanLoop);
-            if (isDecoding) return;
-            if (!captureCtx) return;
 
             const videoEl = document.getElementById('reader-video');
-            if (!videoEl || videoEl.readyState < 2) return;
 
-            isDecoding = true;
-
-            try {
-                captureCtx.drawImage(videoEl, 0, 0, captureCanvas.width, captureCanvas.height);
-                const imageData = captureCtx.getImageData(0, 0, captureCanvas.width, captureCanvas.height);
-
-                // ✅ Выбираем вариант для этого кадра
-                const variant = getVariantForFrame();
-
-                // ✅ Показываем индикатор
-                const indicator = document.getElementById('variant-indicator');
-                if (indicator) {
-                    indicator.textContent = variant.name;
-                    indicator.classList.add('show');
-                }
-
-                // ✅ Применяем предобработку
+            if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
                 try {
-                    variant.apply(imageData);
-                } catch (e) {
-                    console.warn('Variant apply failed:', variant.name, e);
-                }
+                    captureCtx.drawImage(videoEl, 0, 0, captureCanvas.width, captureCanvas.height);
+                    const fullFrame = captureCtx.getImageData(0, 0, captureCanvas.width, captureCanvas.height);
 
+                    // === 1. Raw текущего кадра ===
+                    let hit = await tryDecode(fullFrame);
+                    if (hit) { onScanSuccess(hit.text, hit); return; }
+
+                    frameCounter++;
+
+                    // === 2. Burst + round-robin preprocessing ===
+                    // Каждый кадр: берём кадр из буфера, применяем один из 3 preprocessing
+                    if (burstBuffer.length > 0) {
+                        const idx = burstIndex % burstBuffer.length;
+                        const prepType = Math.floor(burstIndex / burstBuffer.length) % 3;
+                        burstIndex++;
+
+                        const buffered = burstBuffer[idx];
+                        let processed;
+                        try {
+                            if (prepType === 0) {
+                                // CLAHE на уменьшенной копии (в 2-3 раза быстрее)
+                                processed = applyCLAHE(downscaleImageData(buffered, 0.6), 6, 2.0);
+                            } else if (prepType === 1) {
+                                // Жёсткий порог по яркости
+                                processed = applyLuminanceThreshold(buffered, 140);
+                            } else {
+                                // Усиление контраста на downscaled
+                                processed = applyContrast(downscaleImageData(buffered, 0.7), 1.8);
+                            }
+
+                            hit = await tryDecode(processed);
+                            if (hit) { onScanSuccess(hit.text, hit); return; }
+                        } catch (e) {
+                            // ошибка preprocessing — пропускаем этот проход
+                        }
+                    }
+
+                    // === 3. Тайлы (каждый 5-й кадр) ===
+                    if (frameCounter % 5 === 0) {
+                        try {
+                            const tiles = extractOverlappingTiles(fullFrame, 3, 0.55, 1.3);
+                            for (const tile of tiles) {
+                                hit = await tryDecode(tile);
+                                if (hit) { onScanSuccess(hit.text, hit); return; }
+                            }
+                        } catch (e) {
+                            // ошибка tiles — пропускаем
+                        }
+                    }
+
+                    // === Обновление burst-буфера ===
+                    burstBuffer.push(fullFrame);
+                    if (burstBuffer.length > BURST_SIZE) burstBuffer.shift();
+
+                } catch (e) {
+                    // кадр без кода — норма
+                }
+            }
+
+            if (scanningActive) {
+                scanningFrameId = requestAnimationFrame(scanLoop);
+            }
+        }
+
+        async function tryDecode(imageData) {
+            try {
                 const results = await ZXingWASM.readBarcodesFromImageData(imageData, {
                     formats: ["DataMatrix", "QRCode"],
                     tryHarder: true,
                     tryRotate: true,
-                    tryInvert: variant.tryInvert
+                    tryInvert: true,
+                    maxNumberOfSymbols: 1,
+                    tryDownscale: false
                 });
-
-                if (results && results.length > 0 && results[0].text) {
-                    console.log('✓ Сканировано вариантом:', variant.name);
-                    isDecoding = false;
-                    onScanSuccess(results[0].text, results[0]);
-                    return;
-                }
+                return results && results.length > 0 && results[0].text ? results[0] : null;
             } catch (e) {
-                // игнорируем
+                return null;
             }
-
-            isDecoding = false;
         }
 
         function resetStartButton() {
@@ -1037,13 +941,12 @@
                 console.warn('Ошибка остановки камеры:', e);
             }
 
+            // Очистка памяти
             captureCanvas = null;
             captureCtx = null;
-            isDecoding = false;
-
-            // Скрываем индикатор
-            const indicator = document.getElementById('variant-indicator');
-            if (indicator) indicator.classList.remove('show');
+            burstBuffer = [];
+            burstIndex = 0;
+            frameCounter = 0;
 
             lastScanText = '';
             lastScanTime = 0;
@@ -1060,6 +963,168 @@
             isStopping = false;
         }
 
+        // ============================================================
+        //  ПРЕДОБРАБОТКА
+        // ============================================================
+
+        // ✅ CLAHE (адаптивное выравнивание гистограммы)
+        function applyCLAHE(imageData, tiles = 8, clipLimit = 2.0) {
+            const { width, height, data } = imageData;
+
+            const gray = new Uint8ClampedArray(width * height);
+            for (let i = 0; i < data.length; i += 4) {
+                gray[i / 4] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            }
+
+            const tileW = Math.ceil(width / tiles);
+            const tileH = Math.ceil(height / tiles);
+            const cdfs = [];
+
+            for (let ty = 0; ty < tiles; ty++) {
+                for (let tx = 0; tx < tiles; tx++) {
+                    const hist = new Uint32Array(256);
+                    let count = 0;
+                    for (let y = ty * tileH; y < Math.min((ty + 1) * tileH, height); y++) {
+                        for (let x = tx * tileW; x < Math.min((tx + 1) * tileW, width); x++) {
+                            hist[gray[y * width + x]]++;
+                            count++;
+                        }
+                    }
+
+                    const limit = Math.max(1, Math.round((clipLimit * count) / 256));
+                    let excess = 0;
+                    for (let i = 0; i < 256; i++) {
+                        if (hist[i] > limit) { excess += hist[i] - limit; hist[i] = limit; }
+                    }
+                    const redist = Math.floor(excess / 256);
+                    for (let i = 0; i < 256; i++) hist[i] += redist;
+
+                    const cdf = new Uint32Array(256);
+                    let acc = 0;
+                    for (let i = 0; i < 256; i++) { acc += hist[i]; cdf[i] = acc; }
+                    const total = cdf[255] || 1;
+                    for (let i = 0; i < 256; i++) cdf[i] = Math.round((cdf[i] / total) * 255);
+                    cdfs.push(cdf);
+                }
+            }
+
+            const out = new Uint8ClampedArray(data.length);
+            for (let y = 0; y < height; y++) {
+                const ty = Math.min(Math.floor(y / tileH), tiles - 1);
+                const fy = (y - ty * tileH) / tileH;
+                for (let x = 0; x < width; x++) {
+                    const tx = Math.min(Math.floor(x / tileW), tiles - 1);
+                    const fx = (x - tx * tileW) / tileW;
+
+                    const val = gray[y * width + x];
+                    const c00 = cdfs[ty * tiles + tx][val];
+                    const c10 = cdfs[ty * tiles + Math.min(tx + 1, tiles - 1)][val];
+                    const c01 = cdfs[Math.min(ty + 1, tiles - 1) * tiles + tx][val];
+                    const c11 = cdfs[Math.min(ty + 1, tiles - 1) * tiles + Math.min(tx + 1, tiles - 1)][val];
+
+                    const top = c00 * (1 - fx) + c10 * fx;
+                    const bottom = c01 * (1 - fx) + c11 * fx;
+                    const result = Math.round(top * (1 - fy) + bottom * fy);
+
+                    const idx = (y * width + x) * 4;
+                    out[idx] = out[idx + 1] = out[idx + 2] = result;
+                    out[idx + 3] = 255;
+                }
+            }
+
+            return new ImageData(out, width, height);
+        }
+
+        // ✅ Жёсткий порог по яркости
+        function applyLuminanceThreshold(imageData, threshold = 128) {
+            const { width, height, data } = imageData;
+            const out = new Uint8ClampedArray(data.length);
+
+            for (let i = 0; i < data.length; i += 4) {
+                const y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                const v = y >= threshold ? 255 : 0;
+                out[i] = out[i + 1] = out[i + 2] = v;
+                out[i + 3] = 255;
+            }
+
+            return new ImageData(out, width, height);
+        }
+
+        // ✅ Усиление контраста (быстро)
+        function applyContrast(imageData, factor = 1.5) {
+            const d = new Uint8ClampedArray(imageData.data);
+            const intercept = 128 * (1 - factor);
+            for (let i = 0; i < d.length; i += 4) {
+                d[i]     = d[i]     * factor + intercept;
+                d[i + 1] = d[i + 1] * factor + intercept;
+                d[i + 2] = d[i + 2] * factor + intercept;
+            }
+            return new ImageData(d, imageData.width, imageData.height);
+        }
+
+        // ✅ Downscale с переиспользуемыми canvas-ами
+        function downscaleImageData(imageData, factor) {
+            const srcW = imageData.width;
+            const srcH = imageData.height;
+            const dstW = Math.round(srcW * factor);
+            const dstH = Math.round(srcH * factor);
+
+            if (!reusableDownscaleSrc) reusableDownscaleSrc = document.createElement('canvas');
+            reusableDownscaleSrc.width = srcW;
+            reusableDownscaleSrc.height = srcH;
+            reusableDownscaleSrc.getContext('2d').putImageData(imageData, 0, 0);
+
+            if (!reusableDownscaleDst) reusableDownscaleDst = document.createElement('canvas');
+            reusableDownscaleDst.width = dstW;
+            reusableDownscaleDst.height = dstH;
+            const dstCtx = reusableDownscaleDst.getContext('2d', { willReadFrequently: true });
+            dstCtx.imageSmoothingEnabled = true;
+            dstCtx.drawImage(reusableDownscaleSrc, 0, 0, dstW, dstH);
+
+            return dstCtx.getImageData(0, 0, dstW, dstH);
+        }
+
+        // ✅ Перекрывающиеся тайлы с переиспользуемыми canvas-ами
+        function extractOverlappingTiles(imageData, grid = 3, spanRatio = 0.55, upscale = 1.3) {
+            const { width, height } = imageData;
+
+            if (!reusableSrcCanvas) reusableSrcCanvas = document.createElement('canvas');
+            reusableSrcCanvas.width = width;
+            reusableSrcCanvas.height = height;
+            reusableSrcCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+            if (!reusableTileCanvas) reusableTileCanvas = document.createElement('canvas');
+
+            const offsets = [];
+            const step = (1 - spanRatio) / (grid - 1);
+            for (let i = 0; i < grid; i++) offsets.push(i * step);
+
+            const tiles = [];
+            const tileW = Math.min(1200, Math.round(width * spanRatio * upscale));
+            const tileH = Math.min(1200, Math.round(height * spanRatio * upscale));
+
+            reusableTileCanvas.width = tileW;
+            reusableTileCanvas.height = tileH;
+            const tileCtx = reusableTileCanvas.getContext('2d', { willReadFrequently: true });
+            tileCtx.imageSmoothingEnabled = true;
+
+            for (const oy of offsets) {
+                for (const ox of offsets) {
+                    const sx = Math.floor(width * ox);
+                    const sy = Math.floor(height * oy);
+                    const sw = Math.floor(width * spanRatio);
+                    const sh = Math.floor(height * spanRatio);
+
+                    tileCtx.drawImage(reusableSrcCanvas, sx, sy, sw, sh, 0, 0, tileW, tileH);
+                    tiles.push(tileCtx.getImageData(0, 0, tileW, tileH));
+                }
+            }
+            return tiles;
+        }
+
+        // ============================================================
+        //  ФОНАРИК
+        // ============================================================
         async function checkTorchSupport() {
             const btnTorch = document.getElementById('btn-torch');
             try {
@@ -1100,7 +1165,7 @@
         }
 
         // ============================================================
-        //  СКАН ФАЙЛА — пробуем ВСЕ варианты
+        //  СКАН ФАЙЛА
         // ============================================================
         async function onFileSelected(event) {
             const file = event.target.files?.[0];
@@ -1109,66 +1174,30 @@
             if (scanningActive) await stopScanning();
             document.getElementById('scan-error').style.display = 'none';
 
-            const url = URL.createObjectURL(file);
-            const img = new Image();
-
             try {
-                await new Promise((resolve, reject) => {
-                    img.onload = resolve;
-                    img.onerror = reject;
-                    img.src = url;
+                const results = await ZXingWASM.readBarcodesFromImageFile(file, {
+                    formats: ["DataMatrix", "QRCode"],
+                    tryHarder: true,
+                    tryRotate: true,
+                    tryInvert: true,
+                    maxNumberOfSymbols: 1,
+                    tryDownscale: false
                 });
-
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = img.width;
-                tempCanvas.height = img.height;
-                const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-                tempCtx.drawImage(img, 0, 0);
-                const originalData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-                const originalBytes = new Uint8ClampedArray(originalData.data);
-
-                // ✅ Список всех вариантов
-                const allVariants = [
-                    { name: 'grayscale', apply: (d) => grayscaleContrast(d, 1.4), tryInvert: true },
-                    ...SPECIALIZED_VARIANTS,
-                    { name: 'grayscale-mild', apply: (d) => grayscaleContrast(d, 1.0), tryInvert: true }
-                ];
-
-                for (const variant of allVariants) {
-                    try {
-                        // Восстанавливаем оригинал
-                        originalData.data.set(originalBytes);
-                        // Применяем вариант
-                        variant.apply(originalData);
-
-                        const results = await ZXingWASM.readBarcodesFromImageData(originalData, {
-                            formats: ["DataMatrix", "QRCode"],
-                            tryHarder: true,
-                            tryRotate: true,
-                            tryInvert: variant.tryInvert
-                        });
-
-                        if (results && results.length > 0 && results[0].text) {
-                            console.log('✓ Файл распознан вариантом:', variant.name);
-                            handleScanResult(results[0].text, results[0]);
-                            return;
-                        }
-                    } catch (e) {
-                        // пробуем следующий вариант
-                    }
+                if (results && results.length > 0 && results[0].text) {
+                    handleScanResult(results[0].text, results[0]);
+                } else {
+                    throw new Error('Код не найден');
                 }
-
-                throw new Error('Ни один вариант не сработал');
-
             } catch (err) {
                 console.error('Ошибка сканирования файла:', err);
                 showScanError('Не удалось распознать файл', 'Попробуйте другое изображение с чётким QR/DataMatrix.');
-            } finally {
-                URL.revokeObjectURL(url);
-                event.target.value = '';
             }
+            event.target.value = '';
         }
 
+        // ============================================================
+        //  УСПЕШНЫЙ СКАН
+        // ============================================================
         function onScanSuccess(decodedText, decodedResult) {
             const rawText = String(decodedText);
             const now = Date.now();
@@ -1180,6 +1209,9 @@
             handleScanResult(rawText, decodedResult);
         }
 
+        // ============================================================
+        //  РЕЗУЛЬТАТ
+        // ============================================================
         function handleScanResult(rawText, decodedResult) {
             const displayText = cleanScanText(rawText);
             const isGS1 = isGS1Text(rawText);
