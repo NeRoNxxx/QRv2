@@ -527,8 +527,7 @@
                 <video id="reader-video" muted playsinline autoplay></video>
             </div>
             <div class="scanner-controls">
-                <!-- ✅ disabled до готовности WASM -->
-                <button id="btn-start" class="btn-start" disabled>▶ Старт сканирования</button>
+                <button id="btn-start" class="btn-start">▶ Старт сканирования</button>
                 <button id="btn-file" class="btn-file">📁 Скан файла</button>
                 <button id="btn-torch" class="btn-torch" disabled title="Фонарик">🔦</button>
             </div>
@@ -576,8 +575,8 @@
         </div>
     </div>
 
-    <!-- ✅ prescription-scanner (IIFE) -->
-    <script src="https://cdn.jsdelivr.net/npm/prescription-scanner/dist/prescription-scanner.global.js"></script>
+    <!-- ✅ Проверенная библиотека zxing-wasm -->
+    <script src="https://cdn.jsdelivr.net/npm/zxing-wasm@1.3.5/dist/iife/reader/index.js"></script>
     <!-- Генератор QR -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.4.4/qrcode.min.js"></script>
 
@@ -585,15 +584,19 @@
         // ============================================================
         //  СОСТОЯНИЕ
         // ============================================================
-        let prescriptionScanner = null;
         let currentStream = null;
         let scanningActive = false;
+        let scanningFrameId = null;
         let isStopping = false;
         let torchOn = false;
         let torchSupported = false;
         let lastScanText = '';
         let lastScanTime = 0;
         const SCAN_DEBOUNCE_MS = 3000;
+
+        // ✅ Canvas для захвата и предобработки кадров
+        let captureCanvas = null;
+        let captureCtx = null;
 
         let lastGeneratedCanvas = null;
         let lastGeneratedText = '';
@@ -602,14 +605,14 @@
         //  ИНИЦИАЛИЗАЦИЯ
         // ============================================================
         document.addEventListener('DOMContentLoaded', () => {
-            if (typeof PrescriptionScanner === 'undefined') {
-                showScanError('Библиотека prescription-scanner не загружена', 'Проверьте интернет-соединение и обновите страницу.');
+            if (typeof ZXingWASM === 'undefined') {
+                showScanError('Библиотека zxing-wasm не загружена', 'Проверьте интернет-соединение и обновите страницу.');
                 return;
             }
-            console.log('✓ prescription-scanner загружен');
+            console.log('✓ zxing-wasm загружен');
 
-            initScanner();
             initTabs();
+            initScanner();
             initGenerator();
             initHistoryControls();
             initScanModal();
@@ -677,32 +680,72 @@
         }
 
         // ============================================================
-        //  СКАНЕР (prescription-scanner)
+        //  ПРЕДОБРАБОТКА ИЗОБРАЖЕНИЯ (Canvas)
         // ============================================================
-        function initScanner() {
-            try {
-                prescriptionScanner = new PrescriptionScanner.PrescriptionScanner({
-                    preload: 'eager',
-                    formats: ['DataMatrix', 'QRCode'],
-                    onReady: () => {
-                        console.log('✓ PrescriptionScanner готов (DataMatrix + QR)');
-                        // ✅ Разблокируем «Старт» только после готовности WASM
-                        document.getElementById('btn-start').disabled = false;
-                    },
-                    onError: (err) => {
-                        console.error('Ошибка PrescriptionScanner:', err);
-                        showScanError('Ошибка сканера', err?.message || String(err));
-                    },
-                    onScan: (result) => {
-                        onScanSuccess(result.data, result);
-                    }
-                });
-            } catch (err) {
-                console.error('Ошибка инициализации PrescriptionScanner:', err);
-                showScanError('Не удалось инициализировать сканер', err?.message || String(err));
-                return;
+        /**
+         * Улучшает контраст и резкость ImageData для лучшего распознавания.
+         * Возвращает новый ImageData.
+         */
+        function enhanceImageData(imageData) {
+            const width = imageData.width;
+            const height = imageData.height;
+            const data = imageData.data;
+
+            // 1. Grayscale + повышение контраста
+            //    Формула: Y = 0.299R + 0.587G + 0.114B
+            //    Контраст: (Y - 128) * factor + 128
+            const contrastFactor = 1.4; // можно настроить (1.0 = без изменений)
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                let y = 0.299 * r + 0.587 * g + 0.114 * b;
+                y = (y - 128) * contrastFactor + 128;
+                y = Math.max(0, Math.min(255, y));
+                data[i] = y;
+                data[i + 1] = y;
+                data[i + 2] = y;
+                // alpha не трогаем
             }
 
+            // 2. Резкость (простая свёртка 3x3)
+            //    Используем копию данных, чтобы не влиять на соседние пиксели при чтении.
+            const copy = new Uint8ClampedArray(data);
+            const kernel = [
+                 0, -1,  0,
+                -1,  5, -1,
+                 0, -1,  0
+            ];
+            const kSize = 3;
+            const half = 1;
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    let sum = 0;
+                    for (let ky = 0; ky < kSize; ky++) {
+                        for (let kx = 0; kx < kSize; kx++) {
+                            const px = Math.min(width - 1, Math.max(0, x + kx - half));
+                            const py = Math.min(height - 1, Math.max(0, y + ky - half));
+                            const idx = (py * width + px) * 4;
+                            const val = copy[idx]; // уже grayscale
+                            sum += val * kernel[ky * kSize + kx];
+                        }
+                    }
+                    const outIdx = (y * width + x) * 4;
+                    let val = Math.max(0, Math.min(255, sum));
+                    data[outIdx] = val;
+                    data[outIdx + 1] = val;
+                    data[outIdx + 2] = val;
+                }
+            }
+
+            return new ImageData(data, width, height);
+        }
+
+        // ============================================================
+        //  СКАНЕР (zxing-wasm)
+        // ============================================================
+        function initScanner() {
             document.getElementById('btn-start').addEventListener('click', () => {
                 if (scanningActive || isStopping) stopScanning();
                 else startScanning();
@@ -721,10 +764,6 @@
 
         async function startScanning() {
             if (scanningActive || isStopping) return;
-            if (!prescriptionScanner) {
-                alert('Сканер не инициализирован. Обновите страницу.');
-                return;
-            }
 
             const btnStart = document.getElementById('btn-start');
             btnStart.disabled = true;
@@ -744,10 +783,6 @@
             }
 
             try {
-                // ✅ Сброс результатов сканера — разрешает повторно сканировать те же коды
-                try { prescriptionScanner.clearResults(); } catch (e) {}
-
-                const videoEl = document.getElementById('reader-video');
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: { ideal: "environment" },
@@ -755,19 +790,31 @@
                         height: { ideal: 1080 }
                     }
                 });
+
                 currentStream = stream;
+                const videoEl = document.getElementById('reader-video');
                 videoEl.srcObject = stream;
+
+                await new Promise((resolve) => {
+                    if (videoEl.readyState >= 2) { resolve(); return; }
+                    videoEl.onloadeddata = () => resolve();
+                });
                 await videoEl.play();
 
-                await prescriptionScanner.start(videoEl);
+                captureCanvas = document.createElement('canvas');
+                captureCanvas.width = videoEl.videoWidth;
+                captureCanvas.height = videoEl.videoHeight;
+                captureCtx = captureCanvas.getContext('2d', { willReadFrequently: true });
 
-                console.log('✓ PrescriptionScanner камера запущена');
+                console.log(`✓ Камера запущена (${videoEl.videoWidth}×${videoEl.videoHeight})`);
+
                 scanningActive = true;
                 btnStart.textContent = '⏹ Остановить';
                 btnStart.classList.add('is-scanning');
                 btnStart.disabled = false;
 
                 await checkTorchSupport();
+                scanningFrameId = requestAnimationFrame(scanLoop);
 
             } catch (err) {
                 console.error('Не удалось запустить камеру:', err);
@@ -793,6 +840,44 @@
                     }
                 );
                 resetStartButton();
+            }
+        }
+
+        async function scanLoop() {
+            if (!scanningActive) return;
+
+            const videoEl = document.getElementById('reader-video');
+
+            if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+                try {
+                    captureCtx.drawImage(videoEl, 0, 0, captureCanvas.width, captureCanvas.height);
+                    let imageData = captureCtx.getImageData(0, 0, captureCanvas.width, captureCanvas.height);
+
+                    // ✅ Предобработка: контраст + резкость
+                    try {
+                        imageData = enhanceImageData(imageData);
+                    } catch (e) {
+                        console.warn('Ошибка предобработки, используем оригинал:', e);
+                    }
+
+                    const results = await ZXingWASM.readBarcodesFromImageData(imageData, {
+                        formats: ["DataMatrix", "QRCode"],
+                        tryHarder: true,
+                        tryRotate: true,
+                        tryInvert: true
+                    });
+
+                    if (results && results.length > 0 && results[0].text) {
+                        onScanSuccess(results[0].text, results[0]);
+                        return;
+                    }
+                } catch (e) {
+                    // Ошибки декодирования на кадрах без кода — норма
+                }
+            }
+
+            if (scanningActive) {
+                scanningFrameId = requestAnimationFrame(scanLoop);
             }
         }
 
@@ -837,20 +922,28 @@
             isStopping = true;
             scanningActive = false;
 
-            // Выключаем фонарик
+            if (scanningFrameId !== null) {
+                cancelAnimationFrame(scanningFrameId);
+                scanningFrameId = null;
+            }
+
             if (torchOn) {
                 try { await setTorch(false); } catch (e) {}
             }
 
-            // ✅ Библиотека сама очищает поток и видеоэлемент — без ручной остановки треков
             try {
-                prescriptionScanner.stop();
+                if (currentStream) {
+                    currentStream.getTracks().forEach(t => t.stop());
+                    currentStream = null;
+                }
+                const videoEl = document.getElementById('reader-video');
+                if (videoEl) videoEl.srcObject = null;
             } catch (e) {
-                console.warn('Ошибка остановки сканера:', e);
+                console.warn('Ошибка остановки камеры:', e);
             }
 
-            // Только обнуляем ссылку на поток — треки уже остановлены библиотекой
-            currentStream = null;
+            captureCanvas = null;
+            captureCtx = null;
 
             lastScanText = '';
             lastScanTime = 0;
@@ -867,7 +960,6 @@
             isStopping = false;
         }
 
-        // ===== ФОНАРИК =====
         async function checkTorchSupport() {
             const btnTorch = document.getElementById('btn-torch');
             try {
@@ -907,7 +999,6 @@
             }
         }
 
-        // ===== СКАН ФАЙЛА =====
         async function onFileSelected(event) {
             const file = event.target.files?.[0];
             if (!file) return;
@@ -915,7 +1006,6 @@
             if (scanningActive) await stopScanning();
             document.getElementById('scan-error').style.display = 'none';
 
-            // ✅ Правильный метод — scanImage(HTMLImageElement)
             const url = URL.createObjectURL(file);
             const img = new Image();
 
@@ -926,10 +1016,29 @@
                     img.src = url;
                 });
 
-                const results = await prescriptionScanner.scanImage(img);
+                // ✅ Предобработка изображения перед сканированием
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = img.width;
+                tempCanvas.height = img.height;
+                const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+                tempCtx.drawImage(img, 0, 0);
+                let imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
 
-                if (results && results.length > 0 && results[0].data) {
-                    handleScanResult(results[0].data, results[0]);
+                try {
+                    imageData = enhanceImageData(imageData);
+                } catch (e) {
+                    console.warn('Ошибка предобработки файла:', e);
+                }
+
+                const results = await ZXingWASM.readBarcodesFromImageData(imageData, {
+                    formats: ["DataMatrix", "QRCode"],
+                    tryHarder: true,
+                    tryRotate: true,
+                    tryInvert: true
+                });
+
+                if (results && results.length > 0 && results[0].text) {
+                    handleScanResult(results[0].text, results[0]);
                 } else {
                     throw new Error('Код не найден');
                 }
@@ -942,7 +1051,6 @@
             }
         }
 
-        // ===== УСПЕШНЫЙ СКАН =====
         function onScanSuccess(decodedText, decodedResult) {
             const rawText = String(decodedText);
             const now = Date.now();
@@ -954,9 +1062,6 @@
             handleScanResult(rawText, decodedResult);
         }
 
-        // ============================================================
-        //  РЕЗУЛЬТАТ
-        // ============================================================
         function handleScanResult(rawText, decodedResult) {
             const displayText = cleanScanText(rawText);
             const isGS1 = isGS1Text(rawText);
