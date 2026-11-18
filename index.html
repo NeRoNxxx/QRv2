@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QR-Инструменты</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0f0f1a;
+            color: #e8e8f0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+        }
+
+        .app {
+            width: 100%;
+            max-width: 500px;
+            background: #1a1a2e;
+            border-radius: 28px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .app-header {
+            padding: 24px 24px 16px;
+            text-align: center;
+            background: linear-gradient(180deg, #1e1e38 0%, #1a1a2e 100%);
+        }
+
+        .app-header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #6c63ff, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .app-header p { font-size: 0.8rem; color: #6c6c8a; margin-top: 4px; }
+
+        .tabs {
+            display: flex;
+            margin: 0 16px;
+            background: #12121f;
+            border-radius: 14px;
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 10px 8px;
+            border: none;
+            background: transparent;
+            color: #6c6c8a;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 11px;
+            transition: all 0.25s ease;
+        }
+
+        .tab-btn.active {
+            background: #2a2a45;
+            color: #a78bfa;
+            box-shadow: 0 2px 8px rgba(108, 99, 255, 0.2);
+        }
+
+        .tab-content { display: none; padding: 20px 20px 24px; }
+        .tab-content.active { display: block; }
+
+        /* ===== СКАНЕР ===== */
+        #reader {
+            width: 100%;
+            height: 55vh;
+            min-height: 300px;
+            max-height: 520px;
+            border-radius: 18px;
+            overflow: hidden;
+            margin-bottom: 14px;
+            background: #0a0a14;
+            position: relative;
+        }
+
+        #reader video {
+            border-radius: 18px;
+            object-fit: cover;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .scanner-controls { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+
+        .scanner-controls button {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 14px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #6c63ff, #8b7cf6);
+            color: #fff;
+            box-shadow: 0 4px 16px rgba(108, 99, 255, 0.35);
+        }
+
+        .btn-start:active { transform: scale(0.97); }
+        .btn-start:disabled { opacity: 0.5; pointer-events: none; }
+        .btn-start.is-scanning {
+            background: linear-gradient(135deg, #dc3545, #ff5c6c);
+            box-shadow: 0 4px 16px rgba(220, 53, 69, 0.35);
+        }
+
+        .btn-file { background: #2a2a45; color: #c8c8e0; }
+        .btn-file:active { transform: scale(0.97); }
+
+        .btn-torch {
+            background: #2a2a45;
+            color: #f0c040;
+            flex: 0 0 auto;
+            min-width: 52px;
+            padding: 12px;
+        }
+
+        .btn-torch.active {
+            background: #f0c040;
+            color: #1a1a2e;
+            box-shadow: 0 4px 16px rgba(240, 192, 64, 0.4);
+        }
+
+        .btn-torch:disabled { opacity: 0.35; pointer-events: none; }
+
+        .error-box {
+            padding: 16px;
+            background: #2a1520;
+            border: 1px solid #dc3545;
+            border-radius: 14px;
+            margin-top: 12px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .error-box h3 { color: #ff5c6c; font-size: 0.95rem; margin-bottom: 8px; }
+        .error-box p { margin-bottom: 6px; color: #c8c8e0; }
+        .error-box details {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .error-box summary { cursor: pointer; color: #6c63ff; user-select: none; font-weight: 600; }
+        .error-box pre {
+            margin-top: 8px;
+            padding: 10px;
+            background: #0a0a14;
+            border-radius: 8px;
+            font-size: 0.72rem;
+            color: #a0a0c0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* ===== МОДАЛКА ===== */
+        .scan-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 900;
+            padding: 20px;
+            animation: fadeIn 0.2s ease;
+            overscroll-behavior: contain;
+        }
+
+        .scan-modal-overlay.show { display: flex; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        .scan-modal {
+            background: #1a1a2e;
+            border-radius: 20px;
+            max-width: 480px;
+            width: 100%;
+            max-height: 85vh;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 20px;
+            border: 1px solid rgba(108, 99, 255, 0.25);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+            animation: slideUp 0.25s ease;
+        }
+
+        .scan-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            gap: 10px;
+        }
+
+        .scan-modal-header h2 {
+            font-size: 1.05rem;
+            color: #a78bfa;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .scan-modal-close {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            border-radius: 50%;
+            background: #2a2a45;
+            color: #c8c8e0;
+            border: none;
+            font-size: 1.15rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+            line-height: 1;
+        }
+
+        .scan-modal-close:hover { background: #3a3a55; color: #fff; }
+        .scan-modal-close:active { transform: scale(0.92); }
+
+        .scan-modal-body {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            word-break: break-all;
+            color: #e8e8f0;
+        }
+
+        .scan-modal-body strong { color: #a78bfa; }
+
+        .scan-modal-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .scan-modal-actions button {
+            flex: 1;
+            min-width: 110px;
+            padding: 11px 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .btn-regen { background: #6c63ff; color: #fff; }
+        .btn-regen:hover { background: #5750d6; }
+
+        .gs1-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+            color: #fff;
+            font-size: 0.65rem;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+        .raw-details { margin-top: 10px; font-size: 0.78rem; }
+        .raw-details summary { cursor: pointer; color: #6c63ff; user-select: none; }
+        .raw-details code {
+            display: block;
+            padding: 8px 10px;
+            background: #0a0a14;
+            border-radius: 8px;
+            margin-top: 6px;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            font-size: 0.72rem;
+            color: #c8c8e0;
+        }
+
+        /* ===== ГЕНЕРАТОР ===== */
+        .gen-input-group { display: flex; gap: 10px; margin-bottom: 12px; }
+
+        #qr-text {
+            flex: 1;
+            padding: 14px 16px;
+            border: 1px solid #2a2a45;
+            border-radius: 14px;
+            font-size: 0.9rem;
+            background: #12121f;
+            color: #e8e8f0;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        #qr-text:focus { border-color: #6c63ff; }
+        #qr-text::placeholder { color: #5a5a7a; }
+
+        .btn-generate {
+            padding: 14px 20px;
+            border: none;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #6c63ff, #8b7cf6);
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 16px rgba(108, 99, 255, 0.3);
+            transition: 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn-generate:active { transform: scale(0.97); }
+        .btn-generate:disabled { opacity: 0.5; pointer-events: none; }
+
+        .gen-options { margin-bottom: 16px; font-size: 0.85rem; }
+        .gen-options label { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; color: #a0a0c0; }
+        .gen-options input[type="checkbox"] { width: 18px; height: 18px; accent-color: #6c63ff; cursor: pointer; }
+        .gen-options .hint { display: block; color: #5a5a7a; font-size: 0.72rem; margin-top: 4px; margin-left: 26px; }
+
+        #qr-canvas-container {
+            display: flex;
+            justify-content: center;
+            margin: 16px 0;
+            min-height: 180px;
+            align-items: center;
+        }
+
+        #qr-canvas-container canvas,
+        #qr-canvas-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 14px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .qr-actions { display: flex; justify-content: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+
+        .qr-actions button {
+            padding: 10px 18px;
+            border: none;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        #share-qr-btn { background: #17a2b8; color: #fff; }
+        #download-qr-btn { background: #2a2a45; color: #c8c8e0; }
+
+        .gen-result {
+            padding: 14px 16px;
+            background: #12121f;
+            border-radius: 14px;
+            margin-top: 12px;
+            font-size: 0.88rem;
+            line-height: 1.5;
+            word-break: break-all;
+            border: 1px solid rgba(108, 99, 255, 0.15);
+        }
+
+        .gen-result strong { color: #a78bfa; }
+
+        /* ===== ИСТОРИЯ ===== */
+        .history-header { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+
+        .btn-clear-all {
+            padding: 8px 14px;
+            border: 1px solid rgba(220, 53, 69, 0.4);
+            border-radius: 10px;
+            background: transparent;
+            color: #ff5c6c;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-clear-all:hover { background: rgba(220, 53, 69, 0.15); border-color: #dc3545; }
+        .btn-clear-all:active { transform: scale(0.97); }
+
+        #history-list { list-style: none; }
+
+        #history-list li {
+            background: #12121f;
+            padding: 14px 16px;
+            border-radius: 14px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            word-break: break-all;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            gap: 12px;
+        }
+
+        .history-labels { display: flex; gap: 4px; flex-shrink: 0; }
+        .history-item-text { flex: 1; color: #c8c8e0; min-width: 0; }
+
+        .history-actions {
+            display: flex;
+            gap: 14px;
+            flex-shrink: 0;
+            margin-left: 12px;
+            padding-left: 12px;
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .history-item-type {
+            font-size: 0.65rem;
+            padding: 2px 7px;
+            border-radius: 5px;
+            color: #fff;
+            text-transform: uppercase;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .type-scan { background: #28a745; }
+        .type-generate { background: #fd7e14; }
+        .type-gs1 { background: #8b5cf6; }
+
+        .delete-btn, .regen-btn {
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            border-radius: 7px;
+            border: none;
+            cursor: pointer;
+            transition: 0.2s;
+            font-weight: 700;
+        }
+
+        .delete-btn { background: #dc3545; color: #fff; }
+        .delete-btn:hover { background: #b02a37; }
+        .regen-btn { background: #6c63ff; color: #fff; }
+        .regen-btn:hover { background: #5750d6; }
+        .regen-btn.gs1 { background: #8b5cf6; }
+        .regen-btn.gs1:hover { background: #7c3aed; }
+
+        .empty-history { text-align: center; color: #5a5a7a; padding: 30px 20px; font-size: 0.9rem; }
+
+        #app-toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #2a2a45;
+            color: #e8e8f0;
+            padding: 12px 22px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+            pointer-events: none;
+            max-width: 90%;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        #file-input { display: none; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="app-header">
+            <h1>📷 QR-Инструменты</h1>
+            <p>Сканер · Генератор · История</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="scanner">Сканер</button>
+            <button class="tab-btn" data-tab="generator">Генератор</button>
+            <button class="tab-btn" data-tab="history">История</button>
+        </div>
+
+        <div id="scanner" class="tab-content active">
+            <div id="reader">
+                <video id="reader-video" muted playsinline autoplay></video>
+            </div>
+            <div class="scanner-controls">
+                <!-- ✅ disabled до готовности WASM -->
+                <button id="btn-start" class="btn-start" disabled>▶ Старт сканирования</button>
+                <button id="btn-file" class="btn-file">📁 Скан файла</button>
+                <button id="btn-torch" class="btn-torch" disabled title="Фонарик">🔦</button>
+            </div>
+            <input type="file" id="file-input" accept="image/*" capture="environment">
+            <div id="scan-error" class="error-box" style="display: none;"></div>
+        </div>
+
+        <div id="generator" class="tab-content">
+            <div class="gen-input-group">
+                <input type="text" id="qr-text" placeholder="Введите текст или ссылку...">
+                <button id="generate-btn" class="btn-generate">Создать</button>
+            </div>
+            <div class="gen-options">
+                <label>
+                    <input type="checkbox" id="gs1-mode-checkbox">
+                    GS1-режим (FNC1)
+                </label>
+                <span class="hint">Добавляет исходные разделители FNC1 в QR-код (визуально не видны)</span>
+            </div>
+            <div id="qr-canvas-container"></div>
+            <div id="qr-actions" class="qr-actions" style="display: none;">
+                <button id="share-qr-btn" type="button">📤 Поделиться</button>
+                <button id="download-qr-btn" type="button">💾 Скачать PNG</button>
+            </div>
+            <div id="gen-result" class="gen-result" style="display: none;"></div>
+        </div>
+
+        <div id="history" class="tab-content">
+            <div class="history-header">
+                <button id="clear-all-btn" class="btn-clear-all" style="display: none;">🗑 Очистить всю историю</button>
+            </div>
+            <ul id="history-list"></ul>
+            <div id="empty-history" class="empty-history" style="display: none;">История пуста</div>
+        </div>
+    </div>
+
+    <div id="scan-modal-overlay" class="scan-modal-overlay">
+        <div class="scan-modal" role="dialog" aria-modal="true" aria-labelledby="scan-modal-title">
+            <div class="scan-modal-header">
+                <h2 id="scan-modal-title">✅ Результат сканирования</h2>
+                <button class="scan-modal-close" id="scan-modal-close" aria-label="Закрыть">✕</button>
+            </div>
+            <div class="scan-modal-body" id="scan-modal-body"></div>
+            <div class="scan-modal-actions" id="scan-modal-actions"></div>
+        </div>
+    </div>
+
+    <!-- ✅ prescription-scanner (IIFE) -->
+    <script src="https://cdn.jsdelivr.net/npm/prescription-scanner/dist/prescription-scanner.global.js"></script>
+    <!-- Генератор QR -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.4.4/qrcode.min.js"></script>
+
+    <script>
+        // ============================================================
+        //  СОСТОЯНИЕ
+        // ============================================================
+        let prescriptionScanner = null;
+        let currentStream = null;
+        let scanningActive = false;
+        let isStopping = false;
+        let torchOn = false;
+        let torchSupported = false;
+        let lastScanText = '';
+        let lastScanTime = 0;
+        const SCAN_DEBOUNCE_MS = 3000;
+
+        let lastGeneratedCanvas = null;
+        let lastGeneratedText = '';
+
+        // ============================================================
+        //  ИНИЦИАЛИЗАЦИЯ
+        // ============================================================
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof PrescriptionScanner === 'undefined') {
+                showScanError('Библиотека prescription-scanner не загружена', 'Проверьте интернет-соединение и обновите страницу.');
+                return;
+            }
+            console.log('✓ prescription-scanner загружен');
+
+            initScanner();
+            initTabs();
+            initGenerator();
+            initHistoryControls();
+            initScanModal();
+            renderHistory();
+        });
+
+        // ============================================================
+        //  ВКЛАДКИ
+        // ============================================================
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.tab === tabId);
+            });
+            document.querySelectorAll('.tab-content').forEach(c => {
+                c.classList.toggle('active', c.id === tabId);
+            });
+            if (tabId !== 'scanner' && scanningActive) stopScanning();
+            if (tabId === 'history') renderHistory();
+        }
+
+        function initTabs() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+            });
+        }
+
+        // ============================================================
+        //  МОДАЛКА
+        // ============================================================
+        function initScanModal() {
+            document.getElementById('scan-modal-close').addEventListener('click', closeScanModal);
+            document.getElementById('scan-modal-overlay').addEventListener('click', (e) => {
+                if (e.target.id === 'scan-modal-overlay') closeScanModal();
+            });
+            document.addEventListener('keydown', (e) => {
+                const overlay = document.getElementById('scan-modal-overlay');
+                if (!overlay.classList.contains('show')) return;
+                if (e.key === 'Escape') { closeScanModal(); return; }
+                if (e.key === 'Tab') {
+                    const modal = overlay.querySelector('.scan-modal');
+                    const focusables = modal.querySelectorAll(
+                        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+                    );
+                    if (focusables.length === 0) return;
+                    const first = focusables[0];
+                    const last = focusables[focusables.length - 1];
+                    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+                }
+            });
+        }
+
+        function openScanModal() {
+            const overlay = document.getElementById('scan-modal-overlay');
+            overlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+            const modal = overlay.querySelector('.scan-modal');
+            modal.scrollTop = 0;
+            setTimeout(() => document.getElementById('scan-modal-close').focus(), 100);
+        }
+
+        function closeScanModal() {
+            document.getElementById('scan-modal-overlay').classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        // ============================================================
+        //  СКАНЕР (prescription-scanner)
+        // ============================================================
+        function initScanner() {
+            try {
+                prescriptionScanner = new PrescriptionScanner.PrescriptionScanner({
+                    preload: 'eager',
+                    formats: ['DataMatrix', 'QRCode'],
+                    onReady: () => {
+                        console.log('✓ PrescriptionScanner готов (DataMatrix + QR)');
+                        // ✅ Разблокируем «Старт» только после готовности WASM
+                        document.getElementById('btn-start').disabled = false;
+                    },
+                    onError: (err) => {
+                        console.error('Ошибка PrescriptionScanner:', err);
+                        showScanError('Ошибка сканера', err?.message || String(err));
+                    },
+                    onScan: (result) => {
+                        onScanSuccess(result.data, result);
+                    }
+                });
+            } catch (err) {
+                console.error('Ошибка инициализации PrescriptionScanner:', err);
+                showScanError('Не удалось инициализировать сканер', err?.message || String(err));
+                return;
+            }
+
+            document.getElementById('btn-start').addEventListener('click', () => {
+                if (scanningActive || isStopping) stopScanning();
+                else startScanning();
+            });
+
+            document.getElementById('btn-file').addEventListener('click', () => {
+                document.getElementById('file-input').click();
+            });
+            document.getElementById('file-input').addEventListener('change', onFileSelected);
+            document.getElementById('btn-torch').addEventListener('click', toggleTorch);
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden && scanningActive) stopScanning();
+            });
+        }
+
+        async function startScanning() {
+            if (scanningActive || isStopping) return;
+            if (!prescriptionScanner) {
+                alert('Сканер не инициализирован. Обновите страницу.');
+                return;
+            }
+
+            const btnStart = document.getElementById('btn-start');
+            btnStart.disabled = true;
+            btnStart.textContent = '⏳ Запуск...';
+
+            document.getElementById('scan-error').style.display = 'none';
+
+            if (!window.isSecureContext) {
+                showScanError('Небезопасное соединение', 'Камера доступна только по HTTPS или на localhost.');
+                resetStartButton();
+                return;
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showScanError('Браузер не поддерживает камеру', 'navigator.mediaDevices.getUserMedia отсутствует.');
+                resetStartButton();
+                return;
+            }
+
+            try {
+                // ✅ Сброс результатов сканера — разрешает повторно сканировать те же коды
+                try { prescriptionScanner.clearResults(); } catch (e) {}
+
+                const videoEl = document.getElementById('reader-video');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: "environment" },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    }
+                });
+                currentStream = stream;
+                videoEl.srcObject = stream;
+                await videoEl.play();
+
+                await prescriptionScanner.start(videoEl);
+
+                console.log('✓ PrescriptionScanner камера запущена');
+                scanningActive = true;
+                btnStart.textContent = '⏹ Остановить';
+                btnStart.classList.add('is-scanning');
+                btnStart.disabled = false;
+
+                await checkTorchSupport();
+
+            } catch (err) {
+                console.error('Не удалось запустить камеру:', err);
+                let devices = [];
+                try {
+                    const list = await navigator.mediaDevices.enumerateDevices();
+                    devices = list
+                        .filter(d => d.kind === 'videoinput')
+                        .map(d => ({ label: d.label || '(без имени)', id: d.deviceId ? d.deviceId.substring(0, 8) + '…' : '—' }));
+                } catch (e) {}
+
+                showScanError(
+                    'Не удалось запустить камеру',
+                    'Проверьте разрешения и что страница открыта по HTTPS.',
+                    {
+                        error: `${err?.name || 'Error'}: ${err?.message || String(err)}`,
+                        devices,
+                        diagnostics: {
+                            isSecureContext: window.isSecureContext,
+                            protocol: window.location.protocol,
+                            userAgent: navigator.userAgent
+                        }
+                    }
+                );
+                resetStartButton();
+            }
+        }
+
+        function resetStartButton() {
+            const btnStart = document.getElementById('btn-start');
+            btnStart.textContent = '▶ Старт сканирования';
+            btnStart.classList.remove('is-scanning');
+            btnStart.disabled = false;
+            scanningActive = false;
+        }
+
+        function showScanError(title, message, details) {
+            closeScanModal();
+            const box = document.getElementById('scan-error');
+            box.style.display = 'block';
+            box.innerHTML = '';
+
+            const h3 = document.createElement('h3');
+            h3.textContent = '⚠ ' + title;
+            box.appendChild(h3);
+
+            const p = document.createElement('p');
+            p.textContent = message;
+            box.appendChild(p);
+
+            if (details) {
+                const det = document.createElement('details');
+                const sum = document.createElement('summary');
+                sum.textContent = 'Показать диагностику';
+                const pre = document.createElement('pre');
+                pre.textContent = JSON.stringify(details, null, 2);
+                det.appendChild(sum);
+                det.appendChild(pre);
+                box.appendChild(det);
+            }
+        }
+
+        async function stopScanning() {
+            if (isStopping) return;
+            if (!scanningActive) return;
+
+            isStopping = true;
+            scanningActive = false;
+
+            // Выключаем фонарик
+            if (torchOn) {
+                try { await setTorch(false); } catch (e) {}
+            }
+
+            // ✅ Библиотека сама очищает поток и видеоэлемент — без ручной остановки треков
+            try {
+                prescriptionScanner.stop();
+            } catch (e) {
+                console.warn('Ошибка остановки сканера:', e);
+            }
+
+            // Только обнуляем ссылку на поток — треки уже остановлены библиотекой
+            currentStream = null;
+
+            lastScanText = '';
+            lastScanTime = 0;
+            torchSupported = false;
+            torchOn = false;
+
+            resetStartButton();
+
+            const btnTorch = document.getElementById('btn-torch');
+            btnTorch.disabled = true;
+            btnTorch.classList.remove('active');
+            btnTorch.title = 'Фонарик';
+
+            isStopping = false;
+        }
+
+        // ===== ФОНАРИК =====
+        async function checkTorchSupport() {
+            const btnTorch = document.getElementById('btn-torch');
+            try {
+                const track = currentStream?.getVideoTracks?.()[0];
+                if (track && track.getCapabilities) {
+                    const caps = track.getCapabilities();
+                    torchSupported = !!caps.torch;
+                } else {
+                    torchSupported = false;
+                }
+            } catch (e) {
+                torchSupported = false;
+            }
+            btnTorch.disabled = !torchSupported;
+            btnTorch.title = torchSupported ? 'Включить фонарик' : 'Фонарик не поддерживается';
+        }
+
+        async function toggleTorch() {
+            if (!torchSupported || !scanningActive) return;
+            await setTorch(!torchOn);
+        }
+
+        async function setTorch(on) {
+            const btnTorch = document.getElementById('btn-torch');
+            try {
+                const track = currentStream?.getVideoTracks?.()[0];
+                if (!track) throw new Error('Нет видеотрека');
+                await track.applyConstraints({ advanced: [{ torch: on }] });
+                torchOn = on;
+                btnTorch.classList.toggle('active', on);
+                btnTorch.title = on ? 'Выключить фонарик' : 'Включить фонарик';
+            } catch (e) {
+                console.warn('Не удалось переключить фонарик:', e);
+                showToast('Фонарик недоступен на этом устройстве');
+                torchSupported = false;
+                btnTorch.disabled = true;
+            }
+        }
+
+        // ===== СКАН ФАЙЛА =====
+        async function onFileSelected(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+
+            if (scanningActive) await stopScanning();
+            document.getElementById('scan-error').style.display = 'none';
+
+            // ✅ Правильный метод — scanImage(HTMLImageElement)
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+
+            try {
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                    img.src = url;
+                });
+
+                const results = await prescriptionScanner.scanImage(img);
+
+                if (results && results.length > 0 && results[0].data) {
+                    handleScanResult(results[0].data, results[0]);
+                } else {
+                    throw new Error('Код не найден');
+                }
+            } catch (err) {
+                console.error('Ошибка сканирования файла:', err);
+                showScanError('Не удалось распознать файл', 'Попробуйте другое изображение с чётким QR/DataMatrix.');
+            } finally {
+                URL.revokeObjectURL(url);
+                event.target.value = '';
+            }
+        }
+
+        // ===== УСПЕШНЫЙ СКАН =====
+        function onScanSuccess(decodedText, decodedResult) {
+            const rawText = String(decodedText);
+            const now = Date.now();
+            if (rawText === lastScanText && now - lastScanTime < SCAN_DEBOUNCE_MS) return;
+            lastScanText = rawText;
+            lastScanTime = now;
+
+            if (scanningActive) stopScanning();
+            handleScanResult(rawText, decodedResult);
+        }
+
+        // ============================================================
+        //  РЕЗУЛЬТАТ
+        // ============================================================
+        function handleScanResult(rawText, decodedResult) {
+            const displayText = cleanScanText(rawText);
+            const isGS1 = isGS1Text(rawText);
+            const gs1RawData = isGS1 ? stripSymbologyPrefix(rawText) : null;
+            const hasHidden = rawText !== displayText;
+
+            const bodyEl = document.getElementById('scan-modal-body');
+            const actionsEl = document.getElementById('scan-modal-actions');
+            bodyEl.innerHTML = '';
+            actionsEl.innerHTML = '';
+
+            const wrap = document.createElement('div');
+            if (isGS1) {
+                const badge = document.createElement('span');
+                badge.className = 'gs1-badge';
+                badge.textContent = 'GS1';
+                wrap.appendChild(badge);
+            }
+            const textSpan = document.createElement('span');
+            textSpan.innerHTML = `<strong>Результат:</strong> ${escapeHtml(displayText)}`;
+            wrap.appendChild(textSpan);
+            bodyEl.appendChild(wrap);
+
+            if (hasHidden) {
+                const details = document.createElement('details');
+                details.className = 'raw-details';
+                const summary = document.createElement('summary');
+                summary.textContent = 'Показать исходные данные';
+                const rawCode = document.createElement('code');
+                rawCode.textContent = rawText.replace(/\x1D/g, '␝');
+                details.appendChild(summary);
+                details.appendChild(rawCode);
+                bodyEl.appendChild(details);
+            }
+
+            const genBtn = document.createElement('button');
+            genBtn.className = 'btn-regen';
+            genBtn.textContent = '↻ QR';
+            genBtn.onclick = () => {
+                closeScanModal();
+                useScannedText(displayText, gs1RawData);
+            };
+            actionsEl.appendChild(genBtn);
+
+            openScanModal();
+            addToHistory({ text: displayText, rawText: gs1RawData, type: 'scan' });
+        }
+
+        function cleanScanText(text) {
+            if (!text) return '';
+            let cleaned = String(text);
+            cleaned = cleaned.replace(/^\](d2|Q3|e0|C1)/, '');
+            cleaned = cleaned.replace(/\x1D/g, '');
+            cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+            return cleaned;
+        }
+
+        function isGS1Text(text) {
+            const s = String(text);
+            if (/^\](d2|Q3|e0|C1)/.test(s)) return true;
+            if (/\x1D/.test(s)) return true;
+            return false;
+        }
+
+        function stripSymbologyPrefix(text) {
+            return String(text).replace(/^\](d2|Q3|e0|C1)/, '');
+        }
+
+        function useScannedText(text, rawText = null) {
+            switchTab('generator');
+            const input = document.getElementById('qr-text');
+            const checkbox = document.getElementById('gs1-mode-checkbox');
+            input.value = text;
+            if (rawText) {
+                input.dataset.raw = rawText;
+                checkbox.checked = true;
+            } else {
+                delete input.dataset.raw;
+                checkbox.checked = false;
+            }
+            generateQR();
+        }
+
+        // ============================================================
+        //  ГЕНЕРАТОР
+        // ============================================================
+        function initGenerator() {
+            document.getElementById('generate-btn').addEventListener('click', generateQR);
+
+            document.getElementById('gs1-mode-checkbox').addEventListener('change', (e) => {
+                const input = document.getElementById('qr-text');
+                if (e.target.checked) {
+                    if (input.value.includes('\x1D')) {
+                        input.dataset.raw = input.value;
+                    } else if (!input.dataset.raw) {
+                        e.target.checked = false;
+                        showToast('Нет GS1-данных для этого текста');
+                        return;
+                    }
+                } else {
+                    delete input.dataset.raw;
+                }
+                if (input.value.trim()) generateQR();
+            });
+
+            document.getElementById('qr-text').addEventListener('input', () => {
+                const input = document.getElementById('qr-text');
+                delete input.dataset.raw;
+                document.getElementById('gs1-mode-checkbox').checked = false;
+            });
+
+            document.getElementById('share-qr-btn').addEventListener('click', () => {
+                shareQRImage(lastGeneratedCanvas, lastGeneratedText);
+            });
+
+            document.getElementById('download-qr-btn').addEventListener('click', () => {
+                downloadQRImage(lastGeneratedCanvas);
+            });
+        }
+
+        function generateQR() {
+            const input = document.getElementById('qr-text');
+            const checkbox = document.getElementById('gs1-mode-checkbox');
+            const canvasContainer = document.getElementById('qr-canvas-container');
+            const genResult = document.getElementById('gen-result');
+            const qrActions = document.getElementById('qr-actions');
+            const generateBtn = document.getElementById('generate-btn');
+
+            const inputText = input.value.trim();
+            if (!inputText) { alert('Пожалуйста, введите текст или ссылку.'); return; }
+            if (generateBtn.disabled) return;
+            generateBtn.disabled = true;
+
+            let textToEncode = inputText;
+            let isGS1 = false;
+            if (checkbox.checked && input.dataset.raw) {
+                textToEncode = input.dataset.raw;
+                isGS1 = true;
+            }
+            if (textToEncode.indexOf('\x1D') !== -1) isGS1 = true;
+
+            canvasContainer.innerHTML = '';
+            genResult.style.display = 'none';
+            qrActions.style.display = 'none';
+
+            QRCode.toCanvas(textToEncode, { width: 200, margin: 2 }, (error, canvas) => {
+                generateBtn.disabled = false;
+                if (error) { console.error(error); alert('Не удалось сгенерировать QR-код.'); return; }
+                canvasContainer.appendChild(canvas);
+                lastGeneratedCanvas = canvas;
+                lastGeneratedText = inputText;
+
+                qrActions.style.display = 'flex';
+                genResult.style.display = 'block';
+                const badge = isGS1 ? '<span class="gs1-badge">GS1</span> ' : '';
+                genResult.innerHTML = `${badge}<strong>Сгенерировано для:</strong> ${escapeHtml(inputText)}`;
+
+                addToHistory({ text: inputText, rawText: isGS1 ? textToEncode : null, type: 'generate' });
+            });
+        }
+
+        async function shareText(text) {
+            if (navigator.share) {
+                try { await navigator.share({ title: 'QR-код', text: text }); return; }
+                catch (e) { if (e.name === 'AbortError') return; console.warn('Ошибка шаринга:', e); }
+            }
+            try { await navigator.clipboard.writeText(text); showToast('📋 Скопировано в буфер обмена'); }
+            catch (e) { prompt('Скопируйте текст:', text); }
+        }
+
+        function shareQRImage(canvas, text) {
+            if (!canvas) { shareText(text); return; }
+            canvas.toBlob(async (blob) => {
+                if (!blob) { shareText(text); return; }
+                const file = new File([blob], 'qr-code.png', { type: 'image/png' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try { await navigator.share({ files: [file], title: 'QR-код', text: text }); return; }
+                    catch (e) { if (e.name === 'AbortError') return; console.warn('Ошибка шаринга файла:', e); }
+                }
+                downloadQRImage(canvas);
+            }, 'image/png');
+        }
+
+        function downloadQRImage(canvas) {
+            if (!canvas) return;
+            canvas.toBlob((blob) => {
+                if (!blob) return;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'qr-code.png';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('💾 QR-код скачан');
+            }, 'image/png');
+        }
+
+        function showToast(message) {
+            let toast = document.getElementById('app-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'app-toast';
+                toast.setAttribute('role', 'status');
+                toast.setAttribute('aria-live', 'polite');
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.style.opacity = '1';
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 2200);
+        }
+
+        // ============================================================
+        //  ИСТОРИЯ
+        // ============================================================
+        const HISTORY_KEY = 'qr_tool_history';
+
+        function getHistory() {
+            try {
+                const stored = localStorage.getItem(HISTORY_KEY);
+                if (!stored) return [];
+                const parsed = JSON.parse(stored);
+                if (!Array.isArray(parsed)) return [];
+                return parsed.filter(item => item && typeof item.text === 'string' && typeof item.type === 'string');
+            } catch (e) { console.warn('Не удалось прочитать историю:', e); return []; }
+        }
+
+        function saveHistory(history) {
+            try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
+            catch (e) { console.warn('Не удалось сохранить историю:', e); }
+        }
+
+        function addToHistory(item) {
+            const history = getHistory();
+            history.unshift({ text: item.text, rawText: item.rawText || null, type: item.type, timestamp: new Date().toISOString() });
+            if (history.length > 50) history.pop();
+            saveHistory(history);
+        }
+
+        function initHistoryControls() {
+            document.getElementById('clear-all-btn').addEventListener('click', () => {
+                const count = getHistory().length;
+                if (count === 0) return;
+                const confirmed = confirm(`Очистить всю историю?\n\nБудет удалено записей: ${count}.\nЭто действие нельзя отменить.`);
+                if (!confirmed) return;
+                saveHistory([]);
+                renderHistory();
+                showToast('🗑 История очищена');
+            });
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('history-list');
+            const emptyMsg = document.getElementById('empty-history');
+            const clearAllBtn = document.getElementById('clear-all-btn');
+            const history = getHistory();
+
+            list.innerHTML = '';
+
+            if (history.length === 0) { emptyMsg.style.display = 'block'; clearAllBtn.style.display = 'none'; return; }
+            emptyMsg.style.display = 'none';
+            clearAllBtn.style.display = 'flex';
+
+            history.forEach((item, index) => {
+                const li = document.createElement('li');
+                const labelsDiv = document.createElement('div');
+                labelsDiv.className = 'history-labels';
+
+                const typeLabel = document.createElement('span');
+                typeLabel.className = `history-item-type type-${item.type}`;
+                typeLabel.textContent = item.type === 'scan' ? 'Скан' : 'Ген';
+                labelsDiv.appendChild(typeLabel);
+
+                if (item.rawText) {
+                    const gs1Label = document.createElement('span');
+                    gs1Label.className = 'history-item-type type-gs1';
+                    gs1Label.textContent = 'GS1';
+                    labelsDiv.appendChild(gs1Label);
+                }
+
+                const textSpan = document.createElement('span');
+                textSpan.className = 'history-item-text';
+                textSpan.textContent = item.text;
+
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'history-actions';
+
+                const regenBtn = document.createElement('button');
+                regenBtn.className = item.rawText ? 'regen-btn gs1' : 'regen-btn';
+                regenBtn.textContent = '↻';
+                regenBtn.onclick = (e) => { e.stopPropagation(); useScannedText(item.text, item.rawText || null); };
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'delete-btn';
+                delBtn.textContent = '✕';
+                delBtn.onclick = (e) => { e.stopPropagation(); deleteHistoryItem(index); };
+
+                actionsDiv.appendChild(regenBtn);
+                actionsDiv.appendChild(delBtn);
+                li.appendChild(labelsDiv);
+                li.appendChild(textSpan);
+                li.appendChild(actionsDiv);
+                list.appendChild(li);
+            });
+        }
+
+        function deleteHistoryItem(index) {
+            const history = getHistory();
+            const item = history[index];
+            if (!item) return;
+            const preview = item.text.length > 60 ? item.text.substring(0, 60) + '…' : item.text;
+            const confirmed = confirm(`Удалить эту запись?\n\n«${preview}»\n\nЭто действие нельзя отменить.`);
+            if (!confirmed) return;
+            history.splice(index, 1);
+            saveHistory(history);
+            renderHistory();
+            showToast('🗑 Запись удалена');
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>
